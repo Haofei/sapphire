@@ -15,6 +15,7 @@ use sps_common::error::{Result, SpsError};
 use tracing::{debug, error};
 use url::Url;
 
+use crate::http::ProgressCallback;
 use crate::validation::{validate_url, verify_checksum};
 
 const OCI_MANIFEST_V1_TYPE: &str = "application/vnd.oci.image.index.v1+json";
@@ -99,6 +100,25 @@ pub async fn download_oci_blob(
     client: &Client,
     expected_digest: &str,
 ) -> Result<()> {
+    download_oci_blob_with_progress(
+        blob_url,
+        destination_path,
+        config,
+        client,
+        expected_digest,
+        None,
+    )
+    .await
+}
+
+pub async fn download_oci_blob_with_progress(
+    blob_url: &str,
+    destination_path: &Path,
+    config: &Config,
+    client: &Client,
+    expected_digest: &str,
+    progress_callback: Option<ProgressCallback>,
+) -> Result<()> {
     debug!("Downloading OCI blob: {}", blob_url);
     let url = Url::parse(blob_url)
         .map_err(|e| SpsError::Generic(format!("Invalid URL '{blob_url}': {e}")))?;
@@ -109,6 +129,9 @@ pub async fn download_oci_blob(
     let auth = determine_auth(config, client, registry_domain, repo_path).await?;
     let resp = execute_oci_request(client, blob_url, OCI_LAYER_V1_TYPE, &auth).await?;
 
+    // Get total size from Content-Length header if available
+    let total_size = resp.content_length();
+
     let tmp = destination_path.with_file_name(format!(
         ".{}.download",
         destination_path.file_name().unwrap().to_string_lossy()
@@ -116,9 +139,18 @@ pub async fn download_oci_blob(
     let mut out = File::create(&tmp).map_err(|e| SpsError::Io(Arc::new(e)))?;
 
     let mut stream = resp.bytes_stream();
+    let mut bytes_downloaded = 0u64;
+
     while let Some(chunk) = stream.next().await {
         let b = chunk.map_err(|e| SpsError::Http(Arc::new(e)))?;
         std::io::Write::write_all(&mut out, &b).map_err(|e| SpsError::Io(Arc::new(e)))?;
+
+        bytes_downloaded += b.len() as u64;
+
+        // Call progress callback if provided
+        if let Some(ref callback) = progress_callback {
+            callback(bytes_downloaded, total_size);
+        }
     }
     std::fs::rename(&tmp, destination_path).map_err(|e| SpsError::Io(Arc::new(e)))?;
 

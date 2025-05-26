@@ -74,6 +74,11 @@ pub enum PipelineEvent {
         path: PathBuf,
         size_bytes: u64,
     },
+    DownloadProgressUpdate {
+        target_id: String,
+        bytes_so_far: u64,
+        total_size: Option<u64>,
+    },
     DownloadFailed {
         target_id: String,
         url: String,

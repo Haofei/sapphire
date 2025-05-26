@@ -3,7 +3,6 @@ pub mod dmg;
 pub mod helpers;
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
@@ -16,6 +15,7 @@ use sps_common::config::Config;
 use sps_common::error::{Result, SpsError};
 use sps_common::model::artifact::InstalledArtifact;
 use sps_common::model::cask::{Cask, Sha256Field, UrlField};
+use sps_net::http::ProgressCallback;
 use tempfile::TempDir;
 use tracing::{debug, error};
 
@@ -71,6 +71,14 @@ pub fn sps_private_cask_app_path(cask: &Cask, config: &Config) -> Option<PathBuf
 }
 
 pub async fn download_cask(cask: &Cask, cache: &Cache) -> Result<PathBuf> {
+    download_cask_with_progress(cask, cache, None).await
+}
+
+pub async fn download_cask_with_progress(
+    cask: &Cask,
+    cache: &Cache,
+    progress_callback: Option<ProgressCallback>,
+) -> Result<PathBuf> {
     let url_field = cask
         .url
         .as_ref()
@@ -108,6 +116,10 @@ pub async fn download_cask(cask: &Cask, cache: &Cache) -> Result<PathBuf> {
         return Ok(cache_path);
     }
 
+    use futures::StreamExt;
+    use tokio::fs::File as TokioFile;
+    use tokio::io::AsyncWriteExt;
+
     let client = reqwest::Client::new();
     let response = client
         .get(parsed.clone())
@@ -121,15 +133,38 @@ pub async fn download_cask(cask: &Cask, cache: &Cache) -> Result<PathBuf> {
             format!("HTTP status {}", response.status()),
         ));
     }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| SpsError::Http(std::sync::Arc::new(e)))?;
+
+    // Get total size from Content-Length header if available
+    let total_size = response.content_length();
+
     if let Some(parent) = cache_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut file = fs::File::create(&cache_path)?;
-    file.write_all(&bytes)?;
+
+    let mut file = TokioFile::create(&cache_path)
+        .await
+        .map_err(|e| SpsError::Io(std::sync::Arc::new(e)))?;
+
+    // Use bytes_stream() for chunked download with progress reporting
+    let mut stream = response.bytes_stream();
+    let mut bytes_downloaded = 0u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| SpsError::Http(std::sync::Arc::new(e)))?;
+
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| SpsError::Io(std::sync::Arc::new(e)))?;
+
+        bytes_downloaded += chunk.len() as u64;
+
+        // Call progress callback if provided
+        if let Some(ref callback) = progress_callback {
+            callback(bytes_downloaded, total_size);
+        }
+    }
+
+    drop(file);
     match cask.sha256.as_ref() {
         Some(Sha256Field::Hex(s)) => {
             if s.eq_ignore_ascii_case("no_check") {

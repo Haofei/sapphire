@@ -11,6 +11,7 @@ use sps_common::config::Config;
 use sps_common::error::{Result, SpsError};
 use sps_common::model::formula::{Formula, FormulaDependencies, ResourceSpec};
 use sps_net::http as http_fetch;
+use sps_net::http::ProgressCallback;
 use tracing::{debug, error};
 
 use super::env::BuildEnvironment;
@@ -37,6 +38,14 @@ pub(crate) const RECOGNISED_SINGLE_FILE_EXTENSIONS: [&str; 9] =
     ["tar", "gz", "tgz", "bz2", "tbz", "tbz2", "xz", "txz", "zip"];
 
 pub async fn download_source(formula: &Formula, config: &Config) -> Result<PathBuf> {
+    download_source_with_progress(formula, config, None).await
+}
+
+pub async fn download_source_with_progress(
+    formula: &Formula,
+    config: &Config,
+    progress_callback: Option<ProgressCallback>,
+) -> Result<PathBuf> {
     let url = if !formula.url.is_empty() {
         formula.url.clone()
     } else if let Some(homepage) = &formula.homepage {
@@ -60,12 +69,13 @@ pub async fn download_source(formula: &Formula, config: &Config) -> Result<PathB
     };
 
     debug!("Downloading main source for {}", formula.name);
-    http_fetch::fetch_formula_source_or_bottle(
+    http_fetch::fetch_formula_source_or_bottle_with_progress(
         &formula.name,
         &url,
         &formula.sha256,
         &formula.mirrors,
         config,
+        progress_callback,
     )
     .await
 }

@@ -11,6 +11,7 @@ use semver;
 use sps_common::config::Config;
 use sps_common::error::{Result, SpsError};
 use sps_common::model::formula::{BottleFileSpec, Formula, FormulaDependencies};
+use sps_net::http::ProgressCallback;
 use sps_net::oci;
 use sps_net::validation::verify_checksum;
 use tempfile::NamedTempFile;
@@ -25,6 +26,15 @@ pub async fn download_bottle(
     formula: &Formula,
     config: &Config,
     client: &Client,
+) -> Result<PathBuf> {
+    download_bottle_with_progress(formula, config, client, None).await
+}
+
+pub async fn download_bottle_with_progress(
+    formula: &Formula,
+    config: &Config,
+    client: &Client,
+    progress_callback: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
     debug!("Attempting to download bottle for {}", formula.name);
     let (platform_tag, bottle_file_spec) = get_bottle_for_platform(formula)?;
@@ -98,12 +108,13 @@ pub async fn download_bottle(
             "Detected OCI blob URL, initiating direct blob download: {} (Digest: {})",
             bottle_url_str, expected_digest
         );
-        match oci::download_oci_blob(
+        match oci::download_oci_blob_with_progress(
             bottle_url_str,
             &bottle_cache_path,
             config,
             client,
             expected_digest,
+            progress_callback.clone(),
         )
         .await
         {
@@ -128,12 +139,13 @@ pub async fn download_bottle(
             "Detected standard HTTPS URL, using direct download for: {}",
             bottle_url_str
         );
-        match sps_net::http::fetch_formula_source_or_bottle(
+        match sps_net::http::fetch_formula_source_or_bottle_with_progress(
             formula.name(),
             bottle_url_str,
             &bottle_file_spec.sha256,
             &[],
             config,
+            progress_callback,
         )
         .await
         {

@@ -10,6 +10,7 @@ use sps_common::model::InstallTargetIdentifier;
 use sps_common::pipeline::{DownloadOutcome, PipelineEvent, PlannedJob};
 use sps_common::SpsError;
 use sps_core::{build, install};
+use sps_net::http::ProgressCallback;
 use sps_net::UrlField;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinSet;
@@ -103,22 +104,38 @@ impl DownloadCoordinator {
                             }).ok();
                         }
 
+                        // Create progress callback
+                        let progress_callback: Option<ProgressCallback> = if let Some(ref tx) = task_event_tx {
+                            let tx_clone = tx.clone();
+                            let job_id_for_callback = job_id_in_task.clone();
+                            Some(Arc::new(move |bytes_so_far: u64, total_size: Option<u64>| {
+                                let _ = tx_clone.send(PipelineEvent::DownloadProgressUpdate {
+                                    target_id: job_id_for_callback.clone(),
+                                    bytes_so_far,
+                                    total_size,
+                                });
+                            }))
+                        } else {
+                            None
+                        };
+
                         let actual_download_result: Result<PathBuf, SpsError> =
                             match &current_planned_job_for_task.target_definition {
                                 InstallTargetIdentifier::Formula(f) => {
                                     if current_planned_job_for_task.is_source_build {
-                                        build::compile::download_source(f, &task_config).await
+                                        build::compile::download_source_with_progress(f, &task_config, progress_callback).await
                                     } else {
-                                        install::bottle::exec::download_bottle(
+                                        install::bottle::exec::download_bottle_with_progress(
                                             f,
                                             &task_config,
                                             &task_http_client,
+                                            progress_callback,
                                         )
                                         .await
                                     }
                                 }
                                 InstallTargetIdentifier::Cask(c) => {
-                                    install::cask::download_cask(c, task_cache.as_ref()).await
+                                    install::cask::download_cask_with_progress(c, task_cache.as_ref(), progress_callback).await
                                 }
                             };
 

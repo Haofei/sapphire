@@ -65,6 +65,7 @@ struct JobInfo {
     name: String,
     status: JobStatus,
     size_bytes: Option<u64>,
+    current_bytes_downloaded: Option<u64>,
     start_time: Option<Instant>,
     pool_id: usize,
 }
@@ -95,7 +96,7 @@ struct StatusDisplay {
     total_bytes: u64,
     downloaded_bytes: u64,
     last_speed_update: Instant,
-    last_downloaded_bytes: u64,
+    last_aggregate_bytes_snapshot: u64,
     current_speed_bps: f64,
     header_printed: bool,
     last_line_count: usize,
@@ -113,7 +114,7 @@ impl StatusDisplay {
             total_bytes: 0,
             downloaded_bytes: 0,
             last_speed_update: Instant::now(),
-            last_downloaded_bytes: 0,
+            last_aggregate_bytes_snapshot: 0,
             current_speed_bps: 0.0,
             header_printed: false,
             last_line_count: 0,
@@ -126,6 +127,11 @@ impl StatusDisplay {
                 name: target_id.clone(),
                 status,
                 size_bytes,
+                current_bytes_downloaded: if status == JobStatus::Downloading {
+                    Some(0)
+                } else {
+                    None
+                },
                 start_time: if status != JobStatus::Waiting {
                     Some(Instant::now())
                 } else {
@@ -136,6 +142,10 @@ impl StatusDisplay {
 
             if let Some(bytes) = size_bytes {
                 self.total_bytes += bytes;
+            }
+
+            if status == JobStatus::Downloading {
+                self.active_downloads += 1;
             }
 
             self.jobs.insert(target_id.clone(), job_info);
@@ -166,10 +176,37 @@ impl StatusDisplay {
             if was_downloading && !is_downloading {
                 self.active_downloads = self.active_downloads.saturating_sub(1);
                 if let Some(bytes) = job.size_bytes {
+                    job.current_bytes_downloaded = Some(bytes);
                     self.downloaded_bytes += bytes;
                 }
             } else if !was_downloading && is_downloading {
                 self.active_downloads += 1;
+                job.current_bytes_downloaded = Some(0);
+            }
+        }
+    }
+
+    fn update_download_progress(
+        &mut self,
+        target_id: &str,
+        bytes_so_far: u64,
+        total_size: Option<u64>,
+    ) {
+        if let Some(job) = self.jobs.get_mut(target_id) {
+            job.current_bytes_downloaded = Some(bytes_so_far);
+
+            if let Some(total) = total_size {
+                if job.size_bytes.is_none() {
+                    // Update total bytes estimate
+                    self.total_bytes += total;
+                    job.size_bytes = Some(total);
+                } else if job.size_bytes != Some(total) {
+                    // Adjust total bytes if estimate changed
+                    if let Some(old_size) = job.size_bytes {
+                        self.total_bytes = self.total_bytes.saturating_sub(old_size) + total;
+                    }
+                    job.size_bytes = Some(total);
+                }
             }
         }
     }
@@ -179,13 +216,25 @@ impl StatusDisplay {
         let time_diff = now.duration_since(self.last_speed_update).as_secs_f64();
 
         if time_diff >= 0.5 {
-            // Update speed every 0.5 seconds
-            let bytes_diff = self
-                .downloaded_bytes
-                .saturating_sub(self.last_downloaded_bytes);
-            self.current_speed_bps = bytes_diff as f64 / time_diff;
+            // Calculate current total bytes downloaded across all active downloads
+            let current_moment_total_active_bytes: u64 = self
+                .jobs
+                .values()
+                .filter(|job| job.status == JobStatus::Downloading)
+                .map(|job| job.current_bytes_downloaded.unwrap_or(0))
+                .sum();
+
+            // Add completed downloads to the active bytes
+            let current_total_bytes = current_moment_total_active_bytes + self.downloaded_bytes;
+
+            let bytes_diff = current_total_bytes.saturating_sub(self.last_aggregate_bytes_snapshot);
+
+            if time_diff > 0.0 {
+                self.current_speed_bps = bytes_diff as f64 / time_diff;
+            }
+
             self.last_speed_update = now;
-            self.last_downloaded_bytes = self.downloaded_bytes;
+            self.last_aggregate_bytes_snapshot = current_total_bytes;
         }
     }
 
@@ -251,12 +300,30 @@ impl StatusDisplay {
         // Job rows
         for target_id in &self.job_order {
             if let Some(job) = self.jobs.get(target_id) {
+                let progress_str = if job.status == JobStatus::Downloading {
+                    match (job.current_bytes_downloaded, job.size_bytes) {
+                        (Some(downloaded), Some(total)) => {
+                            let percentage = (downloaded as f64 / total as f64 * 100.0).min(100.0);
+                            format!(
+                                "{}/{} ({:.1}%)",
+                                format_bytes(downloaded),
+                                format_bytes(total),
+                                percentage
+                            )
+                        }
+                        (Some(downloaded), None) => format_bytes(downloaded),
+                        _ => job.size_str(),
+                    }
+                } else {
+                    job.size_str()
+                };
+
                 output.push_str(&format!(
                     "{:<6} {:<12} {:<15} {:>8} {}\n",
                     format!("#{:02}", job.pool_id).cyan(),
                     job.status.colored_state(),
                     job.name.cyan(),
-                    job.size_str(),
+                    progress_str,
                     job.status.slot_indicator()
                 ));
             }
@@ -362,6 +429,16 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
                     ..
                 } => {
                     display.update_job_status(&target_id, JobStatus::Downloaded, Some(size_bytes));
+                    if pipeline_active {
+                        display.render();
+                    }
+                }
+                PipelineEvent::DownloadProgressUpdate {
+                    target_id,
+                    bytes_so_far,
+                    total_size,
+                } => {
+                    display.update_download_progress(&target_id, bytes_so_far, total_size);
                     if pipeline_active {
                         display.render();
                     }

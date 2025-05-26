@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
+use futures::StreamExt;
 use reqwest::header::{HeaderMap, ACCEPT, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use sps_common::config::Config;
@@ -13,6 +15,8 @@ use tracing::{debug, error};
 
 use crate::validation::{validate_url, verify_checksum};
 
+pub type ProgressCallback = Arc<dyn Fn(u64, Option<u64>) + Send + Sync>;
+
 const DOWNLOAD_TIMEOUT_SECS: u64 = 300;
 const CONNECT_TIMEOUT_SECS: u64 = 30;
 const USER_AGENT_STRING: &str = "sps package manager (Rust; +https://github.com/alexykn/sp)";
@@ -23,6 +27,25 @@ pub async fn fetch_formula_source_or_bottle(
     sha256_expected: &str,
     mirrors: &[String],
     config: &Config,
+) -> Result<PathBuf> {
+    fetch_formula_source_or_bottle_with_progress(
+        formula_name,
+        url,
+        sha256_expected,
+        mirrors,
+        config,
+        None,
+    )
+    .await
+}
+
+pub async fn fetch_formula_source_or_bottle_with_progress(
+    formula_name: &str,
+    url: &str,
+    sha256_expected: &str,
+    mirrors: &[String],
+    config: &Config,
+    progress_callback: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
     let filename = url
         .split('/')
@@ -92,7 +115,15 @@ pub async fn fetch_formula_source_or_bottle(
         // Validate mirror URL
         validate_url(current_url)?;
         tracing::debug!("Attempting download from: {}", current_url);
-        match download_and_verify(&client, current_url, &cache_path, sha256_expected).await {
+        match download_and_verify(
+            &client,
+            current_url,
+            &cache_path,
+            sha256_expected,
+            progress_callback.clone(),
+        )
+        .await
+        {
             Ok(path) => {
                 tracing::debug!("Successfully downloaded and verified: {}", path.display());
                 return Ok(path);
@@ -117,6 +148,15 @@ pub async fn fetch_resource(
     formula_name: &str,
     resource: &ResourceSpec,
     config: &Config,
+) -> Result<PathBuf> {
+    fetch_resource_with_progress(formula_name, resource, config, None).await
+}
+
+pub async fn fetch_resource_with_progress(
+    formula_name: &str,
+    resource: &ResourceSpec,
+    config: &Config,
+    progress_callback: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
     let resource_cache_dir = config.cache_dir().join("resources");
     fs::create_dir_all(&resource_cache_dir).map_err(|e| {
@@ -174,7 +214,15 @@ pub async fn fetch_resource(
     }
 
     let client = build_http_client()?;
-    match download_and_verify(&client, &resource.url, &cache_path, &resource.sha256).await {
+    match download_and_verify(
+        &client,
+        &resource.url,
+        &cache_path,
+        &resource.sha256,
+        progress_callback,
+    )
+    .await
+    {
         Ok(path) => {
             tracing::debug!(
                 "Successfully downloaded and verified resource: {}",
@@ -212,6 +260,7 @@ async fn download_and_verify(
     url: &str,
     final_path: &Path,
     sha256_expected: &str,
+    progress_callback: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
     let temp_filename = format!(
         ".{}.download",
@@ -265,6 +314,9 @@ async fn download_and_verify(
         };
     }
 
+    // Get total size from Content-Length header if available
+    let total_size = response.content_length();
+
     let mut temp_file = TokioFile::create(&temp_path).await.map_err(|e| {
         SpsError::IoError(format!(
             "Failed to create temp file {}: {}",
@@ -272,17 +324,30 @@ async fn download_and_verify(
             e
         ))
     })?;
-    let content = response
-        .bytes()
-        .await
-        .map_err(|e| SpsError::HttpError(format!("Failed to read response body bytes: {e}")))?;
-    temp_file.write_all(&content).await.map_err(|e| {
-        SpsError::IoError(format!(
-            "Failed to write download stream to {}: {}",
-            temp_path.display(),
-            e
-        ))
-    })?;
+
+    // Use bytes_stream() for chunked download with progress reporting
+    let mut stream = response.bytes_stream();
+    let mut bytes_downloaded = 0u64;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| SpsError::HttpError(format!("Failed to read chunk: {e}")))?;
+
+        temp_file.write_all(&chunk).await.map_err(|e| {
+            SpsError::IoError(format!(
+                "Failed to write chunk to {}: {}",
+                temp_path.display(),
+                e
+            ))
+        })?;
+
+        bytes_downloaded += chunk.len() as u64;
+
+        // Call progress callback if provided
+        if let Some(ref callback) = progress_callback {
+            callback(bytes_downloaded, total_size);
+        }
+    }
+
     drop(temp_file);
     tracing::debug!("Finished writing download stream to temp file.");
 
