@@ -3,7 +3,8 @@
 > [!WARNING]
 > I will scrap this project in favor of sps v2 some time in the future (when v2 is built and ready which might take a while). The reason is that I am planning to
 > implement my own packaging system, my own version of atomic installs / updated complete with automatic snapshots and full, down to single package rollbacks +
-> automatic cve checks and some other stuffs. After a lot of thinking and looking at Homebrew's architecture I've come to the conclusion that I do not like it (burn > me for it ;). Defining my own build system will allow for a more performant and maintainable system in the long run. (Just a bit anxious about how to host packages > / do all the repo stuff. Like really anxious but I'll figure it out)
+> automatic cve checks and some other stuffs. After a lot of thinking and looking at Homebrew's architecture I've come to the conclusion that I do not like it (burn
+> me for it ;). Defining my own build system will allow for a more performant and maintainable system in the long run. (Just a bit anxious about how to host packages > / do all the repo stuff. Like really anxious but I'll figure it out)
 >
 > Another reason is that I made some choices on internal architecture in the beginning that I have come to see as suboptimal but can not easily refactor so this will
 > allow me to go for the better option right from the get go
