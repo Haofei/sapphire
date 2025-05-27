@@ -98,7 +98,7 @@ impl Config {
     }
 
     pub fn state_dir(&self) -> PathBuf {
-        self.sps_root.join("state")
+        self.sps_root.join("sps_state")
     }
 
     pub fn man_base_dir(&self) -> PathBuf {

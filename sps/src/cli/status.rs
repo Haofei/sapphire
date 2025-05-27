@@ -413,7 +413,7 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
                     debug!("{}", "Planning operations.".cyan());
                 }
                 PipelineEvent::DependencyResolutionStarted => {
-                    println!("{}", "Resolving dependencies.".cyan());
+                    println!("{}", "Resolving dependencies".cyan());
                 }
                 PipelineEvent::DependencyResolutionFinished => {
                     debug!("{}", "Dependency resolution complete.".cyan());

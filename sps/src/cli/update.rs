@@ -49,7 +49,7 @@ impl Update {
         }
 
         // Update timestamp file
-        let timestamp_file = config.cache_dir().join(".sps_last_update_check");
+        let timestamp_file = config.state_dir().join(".sps_last_update_check");
         tracing::debug!(
             "Manual update successful. Updating timestamp file: {}",
             timestamp_file.display()
