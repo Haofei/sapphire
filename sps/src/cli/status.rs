@@ -1,5 +1,5 @@
 // sps/src/cli/status.rs
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::time::Instant;
 
@@ -7,12 +7,14 @@ use colored::*;
 use sps_common::config::Config;
 use sps_common::pipeline::{PipelineEvent, PipelinePackageType};
 use tokio::sync::broadcast;
+use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JobStatus {
     Waiting,
     Downloading,
     Downloaded,
+    Cached,
     Processing,
     Installing,
     Linking,
@@ -26,6 +28,7 @@ impl JobStatus {
             JobStatus::Waiting => "waiting",
             JobStatus::Downloading => "downloading",
             JobStatus::Downloaded => "downloaded",
+            JobStatus::Cached => "cached",
             JobStatus::Processing => "processing",
             JobStatus::Installing => "installing",
             JobStatus::Linking => "linking",
@@ -36,12 +39,13 @@ impl JobStatus {
 
     fn slot_indicator(&self) -> String {
         match self {
-            JobStatus::Waiting => " ·".dimmed().to_string(),
-            JobStatus::Downloading => " ↓".yellow().to_string(),
+            JobStatus::Waiting => " ⧗".yellow().to_string(),
+            JobStatus::Downloading => " ⬇".blue().to_string(),
             JobStatus::Downloaded => " ✓".green().to_string(),
-            JobStatus::Processing => " ⚙".blue().to_string(),
-            JobStatus::Installing => " ⚙".magenta().to_string(),
-            JobStatus::Linking => " →".cyan().to_string(),
+            JobStatus::Cached => " ⌂".cyan().to_string(),
+            JobStatus::Processing => " ⚙".yellow().to_string(),
+            JobStatus::Installing => " ⚙".cyan().to_string(),
+            JobStatus::Linking => " →".magenta().to_string(),
             JobStatus::Success => " ✓".green().bold().to_string(),
             JobStatus::Failed => " ✗".red().bold().to_string(),
         }
@@ -50,13 +54,14 @@ impl JobStatus {
     fn colored_state(&self) -> ColoredString {
         match self {
             JobStatus::Waiting => self.display_state().dimmed(),
-            JobStatus::Downloading => self.display_state().yellow(),
+            JobStatus::Downloading => self.display_state().blue(),
             JobStatus::Downloaded => self.display_state().green(),
-            JobStatus::Processing => self.display_state().blue(),
-            JobStatus::Installing => self.display_state().magenta(),
-            JobStatus::Linking => self.display_state().cyan(),
-            JobStatus::Success => self.display_state().green().bold(),
-            JobStatus::Failed => self.display_state().red().bold(),
+            JobStatus::Cached => self.display_state().cyan(),
+            JobStatus::Processing => self.display_state().yellow(),
+            JobStatus::Installing => self.display_state().yellow(),
+            JobStatus::Linking => self.display_state().yellow(),
+            JobStatus::Success => self.display_state().green(),
+            JobStatus::Failed => self.display_state().red(),
         }
     }
 }
@@ -91,13 +96,14 @@ struct StatusDisplay {
     job_order: Vec<String>,
     total_jobs: usize,
     next_pool_id: usize,
-    start_time: Instant,
-    active_downloads: usize,
+    _start_time: Instant,
+    active_downloads: HashSet<String>,
     total_bytes: u64,
     downloaded_bytes: u64,
     last_speed_update: Instant,
     last_aggregate_bytes_snapshot: u64,
     current_speed_bps: f64,
+    _speed_history: Vec<f64>,
     header_printed: bool,
     last_line_count: usize,
 }
@@ -109,13 +115,14 @@ impl StatusDisplay {
             job_order: Vec::new(),
             total_jobs: 0,
             next_pool_id: 1,
-            start_time: Instant::now(),
-            active_downloads: 0,
+            _start_time: Instant::now(),
+            active_downloads: HashSet::new(),
             total_bytes: 0,
             downloaded_bytes: 0,
             last_speed_update: Instant::now(),
             last_aggregate_bytes_snapshot: 0,
             current_speed_bps: 0.0,
+            _speed_history: Vec::new(),
             header_printed: false,
             last_line_count: 0,
         }
@@ -145,7 +152,7 @@ impl StatusDisplay {
             }
 
             if status == JobStatus::Downloading {
-                self.active_downloads += 1;
+                self.active_downloads.insert(target_id.to_string());
             }
 
             self.jobs.insert(target_id.clone(), job_info);
@@ -174,13 +181,13 @@ impl StatusDisplay {
 
             // Update download counts
             if was_downloading && !is_downloading {
-                self.active_downloads = self.active_downloads.saturating_sub(1);
+                self.active_downloads.remove(target_id);
                 if let Some(bytes) = job.size_bytes {
                     job.current_bytes_downloaded = Some(bytes);
                     self.downloaded_bytes += bytes;
                 }
             } else if !was_downloading && is_downloading {
-                self.active_downloads += 1;
+                self.active_downloads.insert(target_id.to_string());
                 job.current_bytes_downloaded = Some(0);
             }
         }
@@ -215,26 +222,34 @@ impl StatusDisplay {
         let now = Instant::now();
         let time_diff = now.duration_since(self.last_speed_update).as_secs_f64();
 
-        if time_diff >= 0.5 {
-            // Calculate current total bytes downloaded across all active downloads
-            let current_moment_total_active_bytes: u64 = self
+        if time_diff >= 0.25 {
+            // Calculate current total bytes for all jobs with current download progress
+            let current_active_bytes: u64 = self
                 .jobs
                 .values()
-                .filter(|job| job.status == JobStatus::Downloading)
+                .filter(|job| matches!(job.status, JobStatus::Downloading))
                 .map(|job| job.current_bytes_downloaded.unwrap_or(0))
                 .sum();
 
-            // Add completed downloads to the active bytes
-            let current_total_bytes = current_moment_total_active_bytes + self.downloaded_bytes;
+            // Calculate bytes difference since last update
+            let bytes_diff =
+                current_active_bytes.saturating_sub(self.last_aggregate_bytes_snapshot);
 
-            let bytes_diff = current_total_bytes.saturating_sub(self.last_aggregate_bytes_snapshot);
-
-            if time_diff > 0.0 {
+            // Calculate speed
+            if time_diff > 0.0 && bytes_diff > 0 {
                 self.current_speed_bps = bytes_diff as f64 / time_diff;
+            } else if !self
+                .jobs
+                .values()
+                .any(|job| job.status == JobStatus::Downloading)
+            {
+                // No active downloads, reset speed to 0
+                self.current_speed_bps = 0.0;
             }
+            // If no bytes diff but still have active downloads, keep previous speed
 
             self.last_speed_update = now;
-            self.last_aggregate_bytes_snapshot = current_total_bytes;
+            self.last_aggregate_bytes_snapshot = current_active_bytes;
         }
     }
 
@@ -251,14 +266,14 @@ impl StatusDisplay {
             let job_lines = job_output.lines().count();
             self.last_line_count = 1 + job_lines + 1 + 1;
         } else {
-            // Subsequent renders - only clear and reprint job rows and summary
+            // Subsequent renders - clear and reprint header, job rows and summary
             self.clear_previous_output();
             self.print_header();
             let job_output = self.build_job_rows();
             print!("{job_output}");
-            // Update line count
+            // Update line count (header + jobs + separator)
             let job_lines = job_output.lines().count();
-            self.last_line_count = 1 + job_lines + 1 + 1;
+            self.last_line_count = 1 + job_lines + 1;
         }
 
         // Print separator
@@ -275,10 +290,8 @@ impl StatusDisplay {
             .values()
             .filter(|j| matches!(j.status, JobStatus::Failed))
             .count();
-        let progress_chars = self.generate_progress_bar(completed, failed);
-        let speed_str = format_speed(self.current_speed_bps);
-
-        println!("{} net {}", progress_chars, speed_str.blue());
+        let _progress_chars = self.generate_progress_bar(completed, failed);
+        let _speed_str = format_speed(self.current_speed_bps);
 
         io::stdout().flush().unwrap();
     }
@@ -302,15 +315,7 @@ impl StatusDisplay {
             if let Some(job) = self.jobs.get(target_id) {
                 let progress_str = if job.status == JobStatus::Downloading {
                     match (job.current_bytes_downloaded, job.size_bytes) {
-                        (Some(downloaded), Some(total)) => {
-                            let percentage = (downloaded as f64 / total as f64 * 100.0).min(100.0);
-                            format!(
-                                "{}/{} ({:.1}%)",
-                                format_bytes(downloaded),
-                                format_bytes(total),
-                                percentage
-                            )
-                        }
+                        (Some(downloaded), Some(_total)) => format_bytes(downloaded).to_string(),
                         (Some(downloaded), None) => format_bytes(downloaded),
                         _ => job.size_str(),
                     }
@@ -402,20 +407,20 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
                 PipelineEvent::PipelineStarted { total_jobs } => {
                     pipeline_active = true;
                     display.total_jobs = total_jobs;
-                    println!("{}", "Starting pipeline...".cyan().bold());
+                    println!("{}", "Starting pipeline.".cyan().bold());
                 }
                 PipelineEvent::PlanningStarted => {
-                    println!("{}", "Planning operations...".cyan());
+                    debug!("{}", "Planning operations.".cyan());
                 }
                 PipelineEvent::DependencyResolutionStarted => {
-                    println!("{}", "Resolving dependencies...".cyan());
+                    println!("{}", "Resolving dependencies.".cyan());
                 }
                 PipelineEvent::DependencyResolutionFinished => {
-                    println!("{}", "Dependency resolution complete.".cyan());
+                    debug!("{}", "Dependency resolution complete.".cyan());
                 }
                 PipelineEvent::PlanningFinished { job_count } => {
                     println!("{} {}", "Planning finished. Jobs:".bold(), job_count);
-                    println!(); // Add blank line before table
+                    println!();
                 }
                 PipelineEvent::DownloadStarted { target_id, url: _ } => {
                     display.add_job(target_id.clone(), JobStatus::Downloading, None);
@@ -439,6 +444,15 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
                     total_size,
                 } => {
                     display.update_download_progress(&target_id, bytes_so_far, total_size);
+                    if pipeline_active {
+                        display.render();
+                    }
+                }
+                PipelineEvent::DownloadCached {
+                    target_id,
+                    size_bytes,
+                } => {
+                    display.update_job_status(&target_id, JobStatus::Cached, Some(size_bytes));
                     if pipeline_active {
                         display.render();
                     }
@@ -534,14 +548,12 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
                     success_count,
                     fail_count,
                 } => {
-                    // Final render to show completed state
                     if display.header_printed {
                         display.render();
                     }
 
-                    println!(); // Add blank line after final table
+                    println!();
 
-                    // Print summary
                     println!(
                         "{} in {:.2}s ({} succeeded, {} failed)",
                         "Pipeline finished".bold(),
@@ -550,26 +562,12 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
                         fail_count
                     );
 
-                    // Print any buffered logs
                     if !logs_buffer.is_empty() {
-                        println!(); // Blank line before logs
+                        println!();
                         for log in &logs_buffer {
                             println!("{log}");
                         }
                     }
-
-                    let elapsed = display.start_time.elapsed().as_secs_f64();
-                    println!(
-                        "\n{}: {}  {}: {}  {}: {}  {}: {:.2}s",
-                        "Total jobs".bold(),
-                        display.total_jobs,
-                        "Completed".green().bold(),
-                        success_count,
-                        "Failed".red().bold(),
-                        fail_count,
-                        "Elapsed".bold(),
-                        elapsed
-                    );
 
                     break;
                 }

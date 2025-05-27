@@ -119,13 +119,13 @@ impl DownloadCoordinator {
                             None
                         };
 
-                        let actual_download_result: Result<PathBuf, SpsError> =
+                        let actual_download_result: Result<(PathBuf, bool), SpsError> =
                             match &current_planned_job_for_task.target_definition {
                                 InstallTargetIdentifier::Formula(f) => {
                                     if current_planned_job_for_task.is_source_build {
-                                        build::compile::download_source_with_progress(f, &task_config, progress_callback).await
+                                        build::compile::download_source_with_progress(f, &task_config, progress_callback).await.map(|p| (p, false))
                                     } else {
-                                        install::bottle::exec::download_bottle_with_progress(
+                                        install::bottle::exec::download_bottle_with_progress_and_cache_info(
                                             f,
                                             &task_config,
                                             &task_http_client,
@@ -135,19 +135,26 @@ impl DownloadCoordinator {
                                     }
                                 }
                                 InstallTargetIdentifier::Cask(c) => {
-                                    install::cask::download_cask_with_progress(c, task_cache.as_ref(), progress_callback).await
+                                    install::cask::download_cask_with_progress(c, task_cache.as_ref(), progress_callback).await.map(|p| (p, false))
                                 }
                             };
 
                         match actual_download_result {
-                            Ok(path) => {
+                            Ok((path, was_cached)) => {
                                 let size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                                 if let Some(ref tx) = task_event_tx {
-                                    tx.send(PipelineEvent::DownloadFinished {
-                                        target_id: job_id_in_task.clone(),
-                                        path: path.clone(),
-                                        size_bytes,
-                                    }).ok();
+                                    if was_cached {
+                                        tx.send(PipelineEvent::DownloadCached {
+                                            target_id: job_id_in_task.clone(),
+                                            size_bytes,
+                                        }).ok();
+                                    } else {
+                                        tx.send(PipelineEvent::DownloadFinished {
+                                            target_id: job_id_in_task.clone(),
+                                            path: path.clone(),
+                                            size_bytes,
+                                        }).ok();
+                                    }
                                 }
                                 download_path_result = Ok(path);
                             }

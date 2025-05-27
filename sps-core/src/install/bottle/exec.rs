@@ -36,6 +36,17 @@ pub async fn download_bottle_with_progress(
     client: &Client,
     progress_callback: Option<ProgressCallback>,
 ) -> Result<PathBuf> {
+    download_bottle_with_progress_and_cache_info(formula, config, client, progress_callback)
+        .await
+        .map(|(path, _)| path)
+}
+
+pub async fn download_bottle_with_progress_and_cache_info(
+    formula: &Formula,
+    config: &Config,
+    client: &Client,
+    progress_callback: Option<ProgressCallback>,
+) -> Result<(PathBuf, bool)> {
     debug!("Attempting to download bottle for {}", formula.name);
     let (platform_tag, bottle_file_spec) = get_bottle_for_platform(formula)?;
     debug!(
@@ -63,7 +74,7 @@ pub async fn download_bottle_with_progress(
             match verify_checksum(&bottle_cache_path, &bottle_file_spec.sha256) {
                 Ok(_) => {
                     debug!("Using valid cached bottle: {}", bottle_cache_path.display());
-                    return Ok(bottle_cache_path);
+                    return Ok((bottle_cache_path, true));
                 }
                 Err(e) => {
                     debug!(
@@ -79,7 +90,7 @@ pub async fn download_bottle_with_progress(
                 "Using cached bottle without checksum verification (checksum not specified): {}",
                 bottle_cache_path.display()
             );
-            return Ok(bottle_cache_path);
+            return Ok((bottle_cache_path, true));
         }
     } else {
         debug!("Bottle not found in cache.");
@@ -193,7 +204,7 @@ pub async fn download_bottle_with_progress(
         "Bottle download successful: {}",
         bottle_cache_path.display()
     );
-    Ok(bottle_cache_path)
+    Ok((bottle_cache_path, false))
 }
 
 pub fn get_bottle_for_platform(formula: &Formula) -> Result<(String, &BottleFileSpec)> {

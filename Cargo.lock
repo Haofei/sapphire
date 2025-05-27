@@ -4386,7 +4386,7 @@ dependencies = [
 
 [[package]]
 name = "sps"
-version = "0.1.55"
+version = "0.1.56"
 dependencies = [
  "clap",
  "clap_complete",
@@ -4424,7 +4424,7 @@ dependencies = [
 
 [[package]]
 name = "sps-common"
-version = "0.1.55"
+version = "0.1.56"
 dependencies = [
  "bitflags 2.9.1",
  "directories",
@@ -4441,7 +4441,7 @@ dependencies = [
 
 [[package]]
 name = "sps-core"
-version = "0.1.55"
+version = "0.1.56"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -4493,7 +4493,7 @@ dependencies = [
 
 [[package]]
 name = "sps-net"
-version = "0.1.55"
+version = "0.1.56"
 dependencies = [
  "futures",
  "hex",
