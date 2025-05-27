@@ -127,13 +127,7 @@ The `sps` binary will be at `target/release/sps`. Add it to your `PATH`.
 
 You can download the latest nightly build from [`actions/workflows/rust.yml`](../../actions/workflows/rust.yml) inside this repository (select a successful build and scroll down to `Artifacts`).
 
-Before running the downloaded binary, remove the quarantine attribute:
-
-```sh
-xattr -d com.apple.quarantine ./sps
-```
-
-Then, you can run the binary directly:
+After extracting the downloaded archive, you can run the binary directly:
 
 ```sh
 ./sps --help
