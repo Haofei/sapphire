@@ -295,10 +295,10 @@ impl<'a> DependencyResolver<'a> {
         if is_initial_target && new_status == ResolutionStatus::Missing {
             new_status = ResolutionStatus::Requested;
         }
-        
+
         let skip_recommended = self.context.skip_recommended;
         let include_optional = self.context.include_optional;
-        
+
         if Self::should_upgrade_optional_status_static(
             new_status,
             tags_from_parent_edge,
@@ -417,11 +417,8 @@ impl<'a> DependencyResolver<'a> {
             requesting_parent_strategy,
         );
 
-        let (status, keg_path) = self.determine_resolution_status(
-            name,
-            is_initial_target,
-            current_node_strategy,
-        )?;
+        let (status, keg_path) =
+            self.determine_resolution_status(name, is_initial_target, current_node_strategy)?;
 
         debug!(
             "Initial status for '{}': {:?}, keg: {:?}, opt: {}",
@@ -464,7 +461,8 @@ impl<'a> DependencyResolver<'a> {
             )),
             NodeInstallStrategy::BottlePreferred | NodeInstallStrategy::BottleOrFail => {
                 if let Some(keg) = self.context.keg_registry.get_installed_keg(name)? {
-                    // Check if this is an upgrade target - if so, mark as Requested even if installed
+                    // Check if this is an upgrade target - if so, mark as Requested even if
+                    // installed
                     let should_request_upgrade = is_initial_target
                         && self
                             .context
@@ -480,7 +478,10 @@ impl<'a> DependencyResolver<'a> {
                         self.context.initial_target_actions.get(name));
 
                     if should_request_upgrade {
-                        debug!("[Resolver] Marking upgrade target '{}' as Requested (was installed)", name);
+                        debug!(
+                            "[Resolver] Marking upgrade target '{}' as Requested (was installed)",
+                            name
+                        );
                         Ok((ResolutionStatus::Requested, Some(keg.path)))
                     } else {
                         debug!("[Resolver] Marking '{}' as Installed (normal case)", name);
@@ -559,7 +560,8 @@ impl<'a> DependencyResolver<'a> {
                     dep_name, parent_name, e
                 );
                 // Optionally, mark parent as failed if child error is critical
-                // self.errors.insert(parent_name.to_string(), Arc::new(e)); // Storing error for parent if needed
+                // self.errors.insert(parent_name.to_string(), Arc::new(e)); // Storing error for
+                // parent if needed
             }
         }
         Ok(())
