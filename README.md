@@ -10,11 +10,16 @@
 > Another reason is that I made some choices on internal architecture in the beginning that I have come to see as suboptimal but can not easily refactor so this will
 > allow me to go for the better option right from the get go (go for rx/tx for status propagation from the start, build the core fully async etc.)
 >
-> I have just made the repo for sps2 public. There is no repositories yet and core systems still do not work and need debugging. However it passes ci (which at the
-> moment fails because I have no runner credits left and can not afford to add any) and the architecture is largely in place. I will have to create a automatic
-> upstream tracking system, automatic builds and create build scripts for the most important tools too still + bootstrap the repositories. Never done that so if
-> anyone has experience with that stuff help is appreciated. Take a look if you want!
-> https://github.com/alexykn/sps2
+> I have just made the repo for sps2 public. There is no repositories yet and core systems still do not work and need debugging. However it passes ci and the
+> architecture is largely in place. I will have to create a automatic upstream tracking system, automatic builds and create build scripts for the most important
+> tools too still + bootstrap the repositories.
+>
+> Never done that so if anyone has experience with that stuff help is appreciated. 
+>
+> For repo architecture I will probably go for a classic unix style repo format with cloudflare r2 and automatic replication to multiple regions. Well that is quite
+> far out. Still it is coming along well, just built my first package with it. Found some small issues with install right after and am working on those now.
+>
+> https://github.com/alexykn/sps2 Take a look if you want!
 
 
 sps is a next‑generation, Rust‑powered package manager inspired by Homebrew. It installs and manages:
