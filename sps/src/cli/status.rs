@@ -222,7 +222,7 @@ impl StatusDisplay {
         let now = Instant::now();
         let time_diff = now.duration_since(self.last_speed_update).as_secs_f64();
 
-        if time_diff >= 0.25 {
+        if time_diff >= 0.0625 {
             // Calculate current total bytes for all jobs with current download progress
             let current_active_bytes: u64 = self
                 .jobs
@@ -400,9 +400,18 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
     let mut display = StatusDisplay::new();
     let mut logs_buffer = Vec::new();
     let mut pipeline_active = false;
+    let mut refresh_interval = tokio::time::interval(tokio::time::Duration::from_millis(62));
+    refresh_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
-        match event_rx.recv().await {
+        tokio::select! {
+            _ = refresh_interval.tick() => {
+                if pipeline_active && display.header_printed {
+                    display.render();
+                }
+            }
+            event_result = event_rx.recv() => {
+                match event_result {
             Ok(event) => match event {
                 PipelineEvent::PipelineStarted { total_jobs } => {
                     pipeline_active = true;
@@ -578,6 +587,8 @@ pub async fn handle_events(_config: Config, mut event_rx: broadcast::Receiver<Pi
             }
             Err(broadcast::error::RecvError::Lagged(_)) => {
                 // Ignore lag for now
+            }
+                }
             }
         }
     }
