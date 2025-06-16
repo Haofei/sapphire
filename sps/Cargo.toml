@@ -23,7 +23,7 @@ sps-core = "0.1.56"
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.12"
 serde_json = "1.0.140"
-reqwest = { version = "0.12.19", features = ["json", "stream", "blocking"] }
+reqwest = { version = "0.12.20", features = ["json", "stream", "blocking"] }
 tokio = { version = "1.45.1", features = ["full"] }
 futures = "0.3.31"
 tracing = "0.1.41"
@@ -35,7 +35,7 @@ regex = "1.11.1"
 tempfile = "3.20.0"
 
 # CLI specific dependencies
-clap = { version = "4.5.39", features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive"] }
 colored = "3.0.0"
 spinners = "4.1.1"
 dialoguer = "0.11.0"
@@ -52,4 +52,4 @@ ratatui = "0.29.0"
 crossterm = "0.29.0"
 
 [build-dependencies]
-clap_complete = "4.5.52"
+clap_complete = "4.5.54"
