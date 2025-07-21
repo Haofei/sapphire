@@ -22,7 +22,7 @@ sps-core = "0.1.56"
 # Direct dependencies (previously workspace inherited)
 serde = { version = "1.0.219", features = ["derive"] }
 thiserror = "2.0.12"
-serde_json = "1.0.140"
+serde_json = "1.0.141"
 reqwest = { version = "0.12.22", features = ["json", "stream", "blocking"] }
 tokio = { version = "1.46.1", features = ["full"] }
 futures = "0.3.31"
