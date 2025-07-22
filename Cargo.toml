@@ -17,7 +17,7 @@ sps-net     = { path = "sps-net" }
 anyhow = "1.0.98"
 thiserror = "2.0.12"
 serde = { version = "1.0.219", features = ["derive"] } # Using the highest specified version and common features
-serde_json = "1.0.140" # Used across multiple crates
+serde_json = "1.0.141" # Used across multiple crates
 reqwest = { version = "0.12.22", features = ["json", "stream", "blocking"] } # Combined features from core, net, cli, common
 tokio = { version = "1.46.1", features = ["full"] } # Used across cli, core, net
 futures = "0.3.31" # Used across cli, core, net
@@ -34,7 +34,7 @@ bitflags = { version = "2.9.1", features = ["serde"] } # Used in common, core (c
 url = "2.5.4" # Used in core, net
 sha2 = "0.10.9" # Used in core, net
 hex = "0.4.3" # Used in core, net
-rand = "0.9.1" # Used in core, net
+rand = "0.9.2" # Used in core, net
 infer = "0.19.0" # Used in core, net
 tempfile = "3.20.0"
 
