@@ -17,9 +17,9 @@ sps-net     = { path = "sps-net" }
 anyhow = "1.0.98"
 thiserror = "2.0.12"
 serde = { version = "1.0.219", features = ["derive"] } # Using the highest specified version and common features
-serde_json = "1.0.141" # Used across multiple crates
+serde_json = "1.0.142" # Used across multiple crates
 reqwest = { version = "0.12.22", features = ["json", "stream", "blocking"] } # Combined features from core, net, cli, common
-tokio = { version = "1.46.1", features = ["full"] } # Used across cli, core, net
+tokio = { version = "1.47.1", features = ["full"] } # Used across cli, core, net
 futures = "0.3.31" # Used across cli, core, net
 tracing = "0.1.41" # Used across cli, common, core, net
 semver = "1.0.26" # Used in common, core
@@ -28,7 +28,7 @@ walkdir = "2.5.0" # Used in cli, core (using highest version)
 indicatif = "0.17.11" # Used in cli, core (using highest version)
 env_logger = "0.11.8" # Used in cli, core
 num_cpus = "1.17.0" # Used in cli, core
-object = { version = "0.37.1", features = ["read_core", "write_core", "macho"] } # Used in common, core (combined features)
+object = { version = "0.37.2", features = ["read_core", "write_core", "macho"] } # Used in common, core (combined features)
 humantime = "2.2.0" # Used in common, core
 bitflags = { version = "2.9.1", features = ["serde"] } # Used in common, core (combined features)
 url = "2.5.4" # Used in core, net
